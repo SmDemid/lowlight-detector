@@ -1,0 +1,100 @@
+/* Общие стили */
+body {
+    padding-bottom: 2rem;
+    background-color: #f8f9fa;
+    color: #212529;
+}
+
+.img-card {
+    max-height: 250px;
+    object-fit: contain;
+    cursor: pointer;
+}
+
+.card {
+    margin-bottom: 20px;
+    background-color: #ffffff;
+    color: #212529;
+    border: 1px solid #dee2e6;
+}
+
+.card-header {
+    background-color: #e9ecef;
+    border-bottom: 1px solid #dee2e6;
+    color: #212529;
+}
+
+.table {
+    --bs-table-bg: #ffffff;
+    color: #212529;
+}
+
+.table-striped > tbody > tr:nth-of-type(odd) > * {
+    --bs-table-accent-bg: #f2f2f2;
+}
+
+.progress {
+    height: 20px;
+}
+
+.preview-container {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.btn-outline-secondary {
+    color: #212529;
+    border-color: #6c757d;
+}
+
+.btn-outline-secondary:hover {
+    background-color: #6c757d;
+    color: white;
+}
+
+.text-muted-custom {
+    color: #6c757d !important;
+}
+
+/* Стили для строк таблицы с изображениями */
+.batch-image-row {
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.batch-image-row:hover {
+    background-color: #e9ecef !important;
+}
+
+/* Адаптация для мобильных устройств */
+@media (max-width: 768px) {
+    .img-card {
+        max-height: 200px;
+    }
+    
+    .card-header h5,
+    .card-header h4 {
+        font-size: 1.1rem;
+    }
+}
+
+/* Стили для кнопок переключения вида */
+.btn-group .btn.active {
+    background-color: #0d6efd;
+    color: white;
+    border-color: #0d6efd;
+}
+
+.btn-group .btn-outline-secondary.active {
+    background-color: #6c757d;
+    color: white;
+}
+
+/* Анимация загрузки */
+#loadingPanel {
+    transition: opacity 0.3s ease;
+}
+
+#loadingPanel.d-none {
+    opacity: 0;
+}

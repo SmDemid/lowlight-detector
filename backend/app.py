@@ -1,4 +1,8 @@
 import os
+import tempfile
+import shutil
+import uuid
+from werkzeug.utils import secure_filename
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 import cv2
@@ -17,6 +21,9 @@ from .detection.rcnn_detector import FasterRCNNDetector
 from .analysis import ModelAnalyzer
 
 from .utils.image_utils import load_image_from_file, image_to_base64, resize_image
+
+
+batch_cache = {}
 
 app = Flask(__name__)
 CORS(app)
@@ -146,6 +153,100 @@ def analyze():
         return jsonify({'error': 'Path does not exist'}), 400
 
     return jsonify(result)
+
+@app.route('/api/analyze-batch', methods=['POST'])
+def analyze_batch():
+    """Обработка нескольких изображений за один запрос."""
+    if 'images' not in request.files:
+        return jsonify({'error': 'No images provided'}), 400
+
+    files = request.files.getlist('images')
+    if not files:
+        return jsonify({'error': 'Empty file list'}), 400
+
+    # Параметры
+    detector_name = request.form.get('detector', 'yolov8m')
+    conf_threshold = float(request.form.get('conf_threshold', 0.25))
+    enhancer_names = request.form.getlist('enhancers')
+    include_individual = request.form.get('include_individual', 'true').lower() == 'true'
+
+    # Создаём временную папку
+    temp_dir = tempfile.mkdtemp()
+    saved_paths = []
+
+    try:
+        # Сохраняем все файлы
+        for file in files:
+            if file and file.filename:
+                filename = secure_filename(file.filename)
+                filepath = os.path.join(temp_dir, filename)
+                file.save(filepath)
+                saved_paths.append(filepath)
+
+        if not saved_paths:
+            return jsonify({'error': 'No valid files saved'}), 400
+
+        # Импортируем ModelAnalyzer (если не импортирован глобально)
+        from .analysis import ModelAnalyzer
+        
+        # Создаём экземпляр анализатора
+        analyzer = ModelAnalyzer(detector_name, conf_threshold)
+        
+        # Генерируем ID пакета
+        batch_id = str(uuid.uuid4())
+        
+        # Получаем результаты С ИЗОБРАЖЕНИЯМИ для кэша
+        result_with_images = analyzer.analyze_folder(
+            folder_path=temp_dir,
+            enhancer_names=enhancer_names,
+            include_images=True,           # важно для кэша
+            include_individual=True
+        )
+        
+        # Сохраняем в кэш
+        batch_cache[batch_id] = result_with_images
+        
+        # Для ответа клиенту убираем base64 (экономия трафика)
+        result_light = {
+            'batch_id': batch_id,
+            'total_images': result_with_images['total_images'],
+            'detector': result_with_images['detector'],
+            'confidence_threshold': result_with_images['confidence_threshold'],
+            'aggregated_stats': result_with_images['aggregated_stats'],
+            'individual_results': []
+        }
+        
+        # Копируем индивидуальные результаты без изображений
+        if include_individual and 'individual_results' in result_with_images:
+            for res in result_with_images['individual_results']:
+                result_light['individual_results'].append(
+                    analyzer._strip_images_from_result(res)
+                )
+        
+        return jsonify(result_light)
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        # Удаляем временную папку
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+@app.route('/api/batch-image/<batch_id>/<int:index>', methods=['GET'])
+def get_batch_image(batch_id, index):
+    """Возвращает детальные результаты (с base64) для одного изображения из кэша пакета."""
+    if batch_id not in batch_cache:
+        return jsonify({'error': 'Batch not found or expired'}), 404
+    
+    batch = batch_cache[batch_id]
+    if 'individual_results' not in batch or index >= len(batch['individual_results']):
+        return jsonify({'error': 'Invalid image index'}), 400
+    
+    return jsonify(batch['individual_results'][index])
+
 
 @app.route('/api/compare_models', methods=['POST'])
 def compare_models():

@@ -31,70 +31,101 @@ class ModelAnalyzer:
             'zero_dce': get_enhancer('zero_dce')
         }
     
-    def analyze_single_image(self, image_path: str, enhancer_names: Optional[List[str]] = None, include_images: bool = True ) -> Dict[str, Any]:
-        """
-        Анализ одного изображения.
-        Возвращает словарь с результатами до и после улучшения.
-        """
+    def analyze_single_image(
+        self,
+        image_path: str,
+        enhancer_names: Optional[List[str]] = None,
+        include_images: bool = True
+    ) -> Dict[str, Any]:
         if enhancer_names is None:
             enhancer_names = list(self.enhancers.keys())
-        
+
         image = cv2.imread(image_path)
         if image is None:
             return {'error': f'Could not read image: {image_path}'}
-        
+
         results = {
             'image_name': os.path.basename(image_path),
-            'original': self._process_original(image),
+            'detector': self.detector_name,
+            'confidence_threshold': self.confidence_threshold,
+            'original': self._process_original(image, include_images),  # ← добавить include_images
             'enhanced': {}
         }
-        
+
         for name in enhancer_names:
             if name in self.enhancers:
                 enhancer = self.enhancers[name]
-                results['enhanced'][name] = self._process_enhanced(image, enhancer)
-        
+                results['enhanced'][name] = self._process_enhanced(image, enhancer, include_images)  # ← и здесь
+
         return results
     
-    def analyze_folder(self, folder_path: str, enhancer_names: Optional[List[str]] = None, include_images: bool = False) -> Dict[str, Any]:
+    def analyze_folder(
+        self,
+        folder_path: str,
+        enhancer_names: Optional[List[str]] = None,
+        include_images: bool = False,
+        include_individual: bool = True   # новый параметр
+    ) -> Dict[str, Any]:
         """
         Анализ всех изображений в папке и агрегация статистики.
         """
         if enhancer_names is None:
             enhancer_names = list(self.enhancers.keys())
-        
+
         image_extensions = ('.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp')
-        image_files = [f for f in os.listdir(folder_path) 
-                       if f.lower().endswith(image_extensions)]
-        
+        image_files = [
+            f for f in os.listdir(folder_path)
+            if f.lower().endswith(image_extensions)
+        ]
+
         if not image_files:
             return {'error': f'No images found in {folder_path}'}
-        
+
         all_results = []
         aggregated = self._init_aggregated_stats(enhancer_names)
-        
+
         for img_file in image_files:
             img_path = os.path.join(folder_path, img_file)
-            result = self.analyze_single_image(
-                image_path=img_path,
-                enhancer_names=enhancer_names,
-                include_images=include_images
-            )
+            result = self.analyze_single_image(img_path, enhancer_names, include_images)
             if 'error' not in result:
+                # Для индивидуальных результатов убираем тяжёлые base64, если они не нужны
+                if not include_images and include_individual:
+                    # Удаляем base64 из индивидуальных результатов для экономии трафика
+                    result = self._strip_images_from_result(result)
                 all_results.append(result)
                 self._update_aggregated_stats(aggregated, result)
-        
-        # Вычисляем средние значения
+
         num_images = len(all_results)
         aggregated = self._finalize_aggregated_stats(aggregated, num_images)
-        
-        return {
+
+        response = {
             'total_images': num_images,
             'detector': self.detector_name,
             'confidence_threshold': self.confidence_threshold,
-            'aggregated_stats': aggregated,
-            'per_image_results': all_results  # можно отключить для больших папок
+            'aggregated_stats': aggregated
         }
+        
+        if include_individual:
+            response['individual_results'] = all_results
+            
+        return response
+
+    def _strip_images_from_result(self, result: Dict) -> Dict:
+        """Удаляет base64-изображения из результата для экономии трафика."""
+        stripped = result.copy()
+        if 'original' in stripped:
+            stripped['original'] = {
+                k: v for k, v in stripped['original'].items()
+                if not k.endswith('_base64')
+            }
+        if 'enhanced' in stripped:
+            stripped['enhanced'] = {}
+            for method, data in result['enhanced'].items():
+                stripped['enhanced'][method] = {
+                    k: v for k, v in data.items()
+                    if not k.endswith('_base64')
+                }
+        return stripped
     
     def _process_original(self, image: np.ndarray, include_images: bool) -> Dict[str, Any]:
         det_result = self.detector.process(image)
